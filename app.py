@@ -1,7 +1,8 @@
 """Painel Macro US — SocInvest / Central de Ferramentas.
 
-Indicadores: ISM (Manufacturing e Services + subíndices), CPI (núcleos),
-GDP e Payroll (desemprego, salários, revisões).
+Indicadores: ISM (Manufacturing e Services + subíndices), Inflação (CPI,
+Core PCE, PPI), Juros (curva de Treasuries, breakeven), GDP, Payroll
+(desemprego, salários, claims, revisões) e JOLTS (vagas, quits, layoffs).
 Fontes: FRED (CSV público) e DBnomics (ISM). Híbrido: upload de CSV/Excel
 pode complementar ou sobrescrever qualquer série (mesmo nome de coluna).
 
@@ -37,7 +38,7 @@ h1,h2,h3 {{ color:{PRIMARY}; }}
 </style>
 <div class="soc-header"><span class="soc-badge">SocInvest</span><div>
 <div style="font-size:26px;font-weight:800;color:{PRIMARY};">Painel Macro — EUA</div>
-<div class="soc-sub">Central de Ferramentas · ISM · CPI · GDP · Payroll</div>
+<div class="soc-sub">Central de Ferramentas · ISM · Inflação · Juros · GDP · Payroll · JOLTS</div>
 </div></div>""", unsafe_allow_html=True)
 
 # ----------------------------------------------------------------------------
@@ -59,6 +60,21 @@ FRED = {  # label -> series_id
     "Taxa de desemprego (%)": "UNRATE",
     "Salário médio/hora (US$)": "CES0500000003",
     "Participação na força de trabalho (%)": "CIVPART",
+    "PCE (índice)": "PCEPI",
+    "Core PCE (índice)": "PCEPILFE",
+    "PPI Final Demand (índice)": "PPIFIS",
+    "Initial Claims (semanal)": "ICSA",
+    "Fed Funds efetiva (%)": "FEDFUNDS",
+    "UST 2 anos (%)": "DGS2",
+    "UST 10 anos (%)": "DGS10",
+    "Spread 10a−2a (p.p.)": "T10Y2Y",
+    "Breakeven 10 anos (%)": "T10YIE",
+    "JOLTS — Vagas abertas (mil)": "JTSJOL",
+    "JOLTS — Taxa de vagas (%)": "JTSJOR",
+    "JOLTS — Hires rate (%)": "JTSHIR",
+    "JOLTS — Quits rate (%)": "JTSQUR",
+    "JOLTS — Layoffs rate (%)": "JTSLDR",
+    "Desempregados (mil)": "UNEMPLOY",
 }
 ISM_DB = {  # label -> (dataset, series_code)
     "ISM Manufacturing PMI": ("pmi", "pm"),
@@ -482,12 +498,18 @@ cpi_mom = {k.replace(" (índice)", " MoM"): mom(S[k]) for k in FRED if k.endswit
 payroll_chg = S["Payroll — emprego total (mil)"].diff()
 ahe_yoy = yoy(S["Salário médio/hora (US$)"])
 ahe_mom = mom(S["Salário médio/hora (US$)"])
+claims = S["Initial Claims (semanal)"] / 1000          # mil, semanal
+claims_4w = claims.rolling(4).mean()
+jolts_mi = S["JOLTS — Vagas abertas (mil)"] / 1000     # milhões
+vac_per_unemp = (S["JOLTS — Vagas abertas (mil)"]
+                 / S["Desempregados (mil)"])           # vagas por desempregado
 
 # ----------------------------------------------------------------------------
 # Abas
 # ----------------------------------------------------------------------------
-tab_ov, tab_ism, tab_cpi, tab_gdp, tab_pay = st.tabs(
-    ["📊 Visão Geral", "🏭 ISM", "💵 CPI", "📈 GDP", "👷 Payroll"])
+tab_ov, tab_ism, tab_cpi, tab_juros, tab_gdp, tab_pay, tab_jolts = st.tabs(
+    ["📊 Visão Geral", "🏭 ISM", "💵 Inflação", "🏦 Juros", "📈 GDP",
+     "👷 Payroll", "🔄 JOLTS"])
 
 with tab_ov:
     st.subheader("Últimos dados")
@@ -499,6 +521,10 @@ with tab_ov:
              ("Desemprego (%)", S["Taxa de desemprego (%)"], 1),
              ("AHE YoY (%)", ahe_yoy, 1),
              ("GDP QoQ anualizado (%)", S["GDP QoQ anualizado (%)"], 1)])
+    kpi_row([("Core PCE YoY (%)", cpi_yoy["Core PCE YoY"], 1),
+             ("Initial Claims (mil)", claims, 0),
+             ("UST 10 anos (%)", S["UST 10 anos (%)"], 2),
+             ("Vagas JOLTS (mi)", jolts_mi, 2)])
     extras = {k: v for k, v in st.session_state.get("uploads", {}).items()
               if canon(k).lower() not in {x.lower() for x in S}}
     if extras:
@@ -525,26 +551,60 @@ with tab_ism:
                "Fonte: ismworld.org (últimos releases) + DBnomics (histórico).")
 
 with tab_cpi:
-    st.subheader("Inflação ao consumidor (CPI)")
-    kpi_row([("Headline YoY (%)", cpi_yoy["CPI YoY"], 1),
-             ("Core YoY (%)", cpi_yoy["Core CPI YoY"], 1),
+    st.subheader("Inflação — CPI, PCE e PPI")
+    kpi_row([("CPI YoY (%)", cpi_yoy["CPI YoY"], 1),
+             ("Core CPI YoY (%)", cpi_yoy["Core CPI YoY"], 1),
+             ("Core PCE YoY (%)", cpi_yoy["Core PCE YoY"], 1),
              ("Serviços ex-shelter YoY (%)", cpi_yoy["CPI Serviços ex-shelter YoY"], 1),
-             ("Shelter YoY (%)", cpi_yoy["CPI Moradia/Shelter YoY"], 1),
-             ("Bens núcleo YoY (%)", cpi_yoy["CPI Bens núcleo YoY"], 1)])
+             ("Shelter YoY (%)", cpi_yoy["CPI Moradia/Shelter YoY"], 1)])
     cut = period_picker("cpi")
     mode = st.radio("Métrica", ["YoY (%)", "MoM (%)"], horizontal=True)
     src = cpi_yoy if mode.startswith("YoY") else cpi_mom
-    default = [c for c in ["CPI YoY", "Core CPI YoY", "CPI Serviços ex-shelter YoY",
-                           "CPI Moradia/Shelter YoY"]]
+    default = [c for c in ["CPI YoY", "Core CPI YoY", "Core PCE YoY",
+                           "CPI Serviços ex-shelter YoY"]]
     default = [d.replace("YoY", "MoM") for d in default] if mode.startswith("MoM") else default
     sel = st.multiselect("Séries", list(src), default=[d for d in default if d in src])
     if sel:
-        line_chart({k: src[k] for k in sel}, ref=None, yfmt="%", cut=cut)
+        line_chart({k: src[k] for k in sel},
+                   ref=2 if mode.startswith("YoY") else None, yfmt="%", cut=cut)
     with st.expander("📋 Tabela e download"):
-        table_download(src, "cpi.csv", cut=cut)
+        table_download(src, "inflacao.csv", cut=cut)
     st.caption("Variações calculadas sobre índices dessazonalizados (SA). "
                "'Serviços ex-shelter' = CPI Services less rent of shelter "
-               "(proxy do supercore). Fonte: BLS via FRED.")
+               "(proxy do supercore). Core PCE é a métrica-alvo do Fed "
+               "(linha de 2%). Fonte: BLS e BEA via FRED.")
+
+with tab_juros:
+    st.subheader("Juros — curva de Treasuries e expectativa de inflação")
+    kpi_row([("Fed Funds efetiva (%)", S["Fed Funds efetiva (%)"], 2),
+             ("UST 2 anos (%)", S["UST 2 anos (%)"], 2),
+             ("UST 10 anos (%)", S["UST 10 anos (%)"], 2),
+             ("Spread 10a−2a (p.p.)", S["Spread 10a−2a (p.p.)"], 2),
+             ("Breakeven 10a (%)", S["Breakeven 10 anos (%)"], 2)])
+    cut = period_picker("juros")
+    st.markdown("**Fed Funds × UST 2 anos × UST 10 anos (%)**")
+    line_chart({"Fed Funds": S["Fed Funds efetiva (%)"],
+                "UST 2 anos": S["UST 2 anos (%)"],
+                "UST 10 anos": S["UST 10 anos (%)"]}, yfmt="%", cut=cut)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Spread 10a−2a (p.p.) — abaixo de 0 = curva invertida**")
+        line_chart({"10a−2a": S["Spread 10a−2a (p.p.)"]}, ref=0,
+                   height=380, cut=cut)
+    with c2:
+        st.markdown("**Breakeven 10 anos (%) — inflação implícita no mercado**")
+        line_chart({"Breakeven 10a": S["Breakeven 10 anos (%)"]}, ref=2,
+                   yfmt="%", height=380, cut=cut)
+    with st.expander("📋 Tabela e download"):
+        table_download({"Fed Funds (%)": S["Fed Funds efetiva (%)"],
+                        "UST 2a (%)": S["UST 2 anos (%)"],
+                        "UST 10a (%)": S["UST 10 anos (%)"],
+                        "Spread 10a−2a": S["Spread 10a−2a (p.p.)"],
+                        "Breakeven 10a (%)": S["Breakeven 10 anos (%)"]},
+                       "juros.csv", cut=cut)
+    st.caption("Treasuries e breakeven são diários; Fed Funds efetiva é média "
+               "mensal. Inversão da curva (spread < 0) historicamente antecede "
+               "recessões. Fonte: Fed/Treasury via FRED.")
 
 with tab_gdp:
     st.subheader("Atividade — PIB real")
@@ -569,16 +629,20 @@ with tab_pay:
     st.subheader("Mercado de trabalho")
     rev2m = st.session_state.get("uploads", {}).get("Revisão 2M (mil)", pd.Series(dtype=float))
     kpis = [("Payroll MoM (mil)", payroll_chg, 0),
+            ("Initial Claims (mil)", claims, 0),
             ("Desemprego (%)", S["Taxa de desemprego (%)"], 1),
             ("AHE MoM (%)", ahe_mom, 1),
             ("AHE YoY (%)", ahe_yoy, 1),
             ("Participação (%)", S["Participação na força de trabalho (%)"], 1)]
     if not rev2m.dropna().empty:
         kpis.insert(1, ("Revisão 2M (mil)", rev2m, 0))
-    kpi_row(kpis[:5])
+    kpi_row(kpis[:6])
     cut = period_picker("pay")
     st.markdown("**Criação de vagas — Nonfarm Payrolls (mil/mês)**")
     bar_chart(payroll_chg, "Payroll MoM", suffix="", cut=cut, avg3=True)
+    st.markdown("**Initial Claims — pedidos de seguro-desemprego (mil, semanal)**")
+    line_chart({"Claims": claims, "Média 4 semanas": claims_4w},
+               height=380, cut=cut)
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**Desemprego (esq.) × Participação (dir.), %**")
@@ -611,10 +675,45 @@ with tab_pay:
                 "`Revisão 2M (mil)` (valores do release do BLS).")
     with st.expander("📋 Tabela e download"):
         table_download({"Payroll MoM (mil)": payroll_chg,
+                        "Initial Claims (mil)": claims,
                         "Desemprego (%)": S["Taxa de desemprego (%)"],
                         "AHE MoM (%)": ahe_mom, "AHE YoY (%)": ahe_yoy},
                        "payroll.csv", cut=cut)
-    st.caption("Fonte: BLS via FRED. Dados dessazonalizados.")
+    st.caption("Fonte: BLS e DOL via FRED. Dados dessazonalizados. "
+               "Claims é semanal — o termômetro mais tempestivo do emprego.")
+
+with tab_jolts:
+    st.subheader("JOLTS — vagas, contratações e desligamentos")
+    kpi_row([("Vagas abertas (mi)", jolts_mi, 2),
+             ("Vagas por desempregado", vac_per_unemp, 2),
+             ("Taxa de vagas (%)", S["JOLTS — Taxa de vagas (%)"], 1),
+             ("Quits rate (%)", S["JOLTS — Quits rate (%)"], 1),
+             ("Layoffs rate (%)", S["JOLTS — Layoffs rate (%)"], 1)])
+    cut = period_picker("jolts")
+    st.markdown("**Vagas abertas (milhões)**")
+    line_chart({"Vagas abertas": jolts_mi}, height=380, cut=cut)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Hires × Quits × Layoffs (taxa, %)**")
+        line_chart({"Hires": S["JOLTS — Hires rate (%)"],
+                    "Quits": S["JOLTS — Quits rate (%)"],
+                    "Layoffs": S["JOLTS — Layoffs rate (%)"]},
+                   yfmt="%", height=380, cut=cut)
+    with c2:
+        st.markdown("**Vagas por desempregado — acima de 1 = mercado apertado**")
+        line_chart({"Vagas/desempregado": vac_per_unemp}, ref=1,
+                   height=380, cut=cut)
+    with st.expander("📋 Tabela e download"):
+        table_download({"Vagas abertas (mi)": jolts_mi,
+                        "Vagas por desempregado": vac_per_unemp,
+                        "Taxa de vagas (%)": S["JOLTS — Taxa de vagas (%)"],
+                        "Hires rate (%)": S["JOLTS — Hires rate (%)"],
+                        "Quits rate (%)": S["JOLTS — Quits rate (%)"],
+                        "Layoffs rate (%)": S["JOLTS — Layoffs rate (%)"]},
+                       "jolts.csv", cut=cut)
+    st.caption("Quits alto = trabalhador confiante (pede demissão por opção); "
+               "layoffs baixo = empresas segurando gente. JOLTS sai com ~1 mês "
+               "de defasagem vs. payroll. Fonte: BLS via FRED.")
 
 st.divider()
 st.caption(f"SocInvest · Painel Macro US · FRED + DBnomics (cache 6h) · "
