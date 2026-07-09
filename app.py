@@ -70,6 +70,7 @@ FRED = {  # label -> series_id
     "Spread 10a−2a (p.p.)": "T10Y2Y",
     "Breakeven 10 anos (%)": "T10YIE",
     "JOLTS — Vagas abertas (mil)": "JTSJOL",
+    "JOLTS — Hires (mil)": "JTSHIL",
     "JOLTS — Taxa de vagas (%)": "JTSJOR",
     "JOLTS — Hires rate (%)": "JTSHIR",
     "JOLTS — Quits rate (%)": "JTSQUR",
@@ -350,6 +351,39 @@ def merged(label: str) -> pd.Series:
     return s.combine_first(api).sort_index() if not api.empty else s
 
 
+# --- comentários por data (anotações pós-divulgação) -------------------------
+COMMENTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "dados", "comentarios.csv")
+COMMENTS_COLS = ["Date", "Aba", "Comentário"]
+COMMENT_TABS = ["Geral", "ISM", "Inflação", "Juros", "GDP", "Payroll", "JOLTS"]
+
+
+def load_comments() -> pd.DataFrame:
+    try:
+        df = pd.read_csv(COMMENTS_PATH)
+    except Exception:
+        return pd.DataFrame(columns=COMMENTS_COLS)
+    df.columns = COMMENTS_COLS[:len(df.columns)]
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df = df.dropna(subset=["Date"])
+    df["Aba"] = df.get("Aba", "Geral").fillna("Geral")
+    df["Comentário"] = df.get("Comentário", "").fillna("")
+    return df[COMMENTS_COLS].sort_values("Date", ascending=False)
+
+
+def show_comments(aba: str):
+    """Expander com os comentários da aba (mais recentes primeiro)."""
+    df = st.session_state.get("comments", pd.DataFrame())
+    if df.empty:
+        return
+    sub = df[df["Aba"] == aba].dropna(subset=["Date"])
+    if sub.empty:
+        return
+    with st.expander(f"🗒️ Comentários — {aba} ({len(sub)})"):
+        for _, r in sub.sort_values("Date", ascending=False).iterrows():
+            st.markdown(f"**{pd.Timestamp(r['Date']):%d/%m/%Y}** — {r['Comentário']}")
+
+
 # ----------------------------------------------------------------------------
 # Helpers de UI
 # ----------------------------------------------------------------------------
@@ -412,8 +446,13 @@ def line_chart(series_map, ref=None, height=460, yfmt=None, cut=None, secondary=
     st.plotly_chart(fig, use_container_width=True)
 
 
-def bar_chart(s, name, height=380, suffix="", cut=None, avg3=False):
+def bar_chart(s, name, height=380, suffix="", cut=None, avg=None, ymin=None):
+    """avg: (janela, rótulo) sobrepõe média móvel em linha — ex.: (4, "Média 4 semanas").
+    ymin: piso do eixo Y (recorta a base das barras para dar zoom na variação)."""
     s = s.dropna()
+    if avg:
+        n, lbl = avg
+        m = s.rolling(n).mean()
     if cut is not None:
         s = s[s.index >= cut]
     if s.empty:
@@ -421,14 +460,43 @@ def bar_chart(s, name, height=380, suffix="", cut=None, avg3=False):
         return
     colors = [ACCENT if v >= 0 else NEG for v in s.values]
     fig = go.Figure(go.Bar(x=s.index, y=s.values, name=name, marker_color=colors))
-    if avg3:
-        m = s.rolling(3).mean()
+    if avg:
+        if cut is not None:
+            m = m[m.index >= cut]
         fig.add_trace(go.Scatter(x=m.index, y=m.values, mode="lines",
-                                 name="Média 3m", line=dict(color=PRIMARY, width=2)))
+                                 name=lbl, line=dict(color=PRIMARY, width=2)))
+    if ymin is not None:
+        top = max([s.max()] + ([m.max()] if avg and not m.dropna().empty else []))
+        fig.update_yaxes(range=[ymin, float(top) * 1.03])
     fig.update_layout(template="plotly_white", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=height, hovermode="x unified",
                       legend=dict(orientation="h", y=1.02, x=0),
                       margin=dict(l=10, r=10, t=30, b=10))
     fig.update_yaxes(gridcolor=GRID, ticksuffix=suffix)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def line_bar_chart(line_s, line_name, bar_s, bar_name, height=380, cut=None,
+                   suffix="%", y2_zoom=False):
+    """Linha no eixo esquerdo, barras no direito. y2_zoom: eixo das barras
+    ajustado à faixa dos dados (para série de nível, ex.: participação)."""
+    a, b = line_s.dropna(), bar_s.dropna()
+    if cut is not None:
+        a, b = a[a.index >= cut], b[b.index >= cut]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=b.index, y=b.values, name=f"{bar_name} (dir.)",
+                         yaxis="y2", marker_color=ACCENT, opacity=0.55))
+    fig.add_trace(go.Scatter(x=a.index, y=a.values, name=line_name,
+                             line=dict(color=PRIMARY, width=2)))
+    y2 = dict(overlaying="y", side="right", ticksuffix=suffix, showgrid=False)
+    if y2_zoom and not b.empty:
+        pad = (b.max() - b.min()) * 0.15 or 0.5
+        y2["range"] = [float(b.min() - pad), float(b.max() + pad)]
+    fig.update_layout(template="plotly_white", paper_bgcolor="rgba(0,0,0,0)",
+                      plot_bgcolor="rgba(0,0,0,0)", height=height,
+                      hovermode="x unified",
+                      legend=dict(orientation="h", y=1.02, x=0),
+                      margin=dict(l=10, r=10, t=30, b=10),
+                      yaxis=dict(ticksuffix=suffix, gridcolor=GRID), yaxis2=y2)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -457,7 +525,8 @@ with st.sidebar:
     local_files = sorted(
         p for p in glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                           "dados", "*"))
-        if p.lower().endswith((".csv", ".xlsx", ".xls")))
+        if p.lower().endswith((".csv", ".xlsx", ".xls"))
+        and os.path.basename(p).lower() != "comentarios.csv")
     local = {}
     for p in local_files:
         try:
@@ -481,6 +550,9 @@ with st.sidebar:
 # ----------------------------------------------------------------------------
 # Carrega tudo
 # ----------------------------------------------------------------------------
+if "comments" not in st.session_state:
+    st.session_state["comments"] = load_comments()
+
 with st.spinner("Carregando dados..."):
     S = {label: merged(label) for label in list(ISM_DB) + list(FRED)}
 
@@ -499,8 +571,8 @@ payroll_chg = S["Payroll — emprego total (mil)"].diff()
 ahe_yoy = yoy(S["Salário médio/hora (US$)"])
 ahe_mom = mom(S["Salário médio/hora (US$)"])
 claims = S["Initial Claims (semanal)"] / 1000          # mil, semanal
-claims_4w = claims.rolling(4).mean()
 jolts_mi = S["JOLTS — Vagas abertas (mil)"] / 1000     # milhões
+hires_mi = S["JOLTS — Hires (mil)"] / 1000             # milhões
 vac_per_unemp = (S["JOLTS — Vagas abertas (mil)"]
                  / S["Desempregados (mil)"])           # vagas por desempregado
 
@@ -531,6 +603,35 @@ with tab_ov:
         st.divider()
         st.subheader("Séries extras (upload)")
         line_chart(extras, cut=period_picker("ov"))
+    st.divider()
+    st.subheader("🗒️ Comentários por data")
+    st.caption("Anotações feitas após cada divulgação — aparecem na aba "
+               "correspondente. Edite abaixo (linhas novas no +). Para "
+               "persistir no Streamlit Cloud, baixe o CSV e commite em "
+               "`dados/comentarios.csv`; o 💾 grava direto no arquivo "
+               "quando rodando localmente.")
+    edited = st.data_editor(
+        st.session_state["comments"], num_rows="dynamic",
+        use_container_width=True, key="comments_editor",
+        column_config={
+            "Date": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+            "Aba": st.column_config.SelectboxColumn("Aba", options=COMMENT_TABS,
+                                                    default="Geral"),
+            "Comentário": st.column_config.TextColumn("Comentário", width="large"),
+        })
+    st.session_state["comments"] = edited
+    csv_out = edited.dropna(subset=["Date"]).copy()
+    if not csv_out.empty:
+        csv_out["Date"] = pd.to_datetime(csv_out["Date"]).dt.strftime("%Y-%m-%d")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("💾 Salvar em dados/comentarios.csv"):
+            csv_out.to_csv(COMMENTS_PATH, index=False)
+            st.success(f"{len(csv_out)} comentário(s) salvos.")
+    with c2:
+        st.download_button("⬇️ Baixar comentarios.csv",
+                           csv_out.to_csv(index=False).encode("utf-8"),
+                           "comentarios.csv", "text/csv")
 
 with tab_ism:
     st.subheader("ISM — Manufacturing")
@@ -547,6 +648,7 @@ with tab_ism:
         line_chart({k: S[k] for k in sel_ism}, ref=50, cut=cut)
     with st.expander("📋 Tabela e download"):
         table_download({k: S[k] for k in ISM_MFG + ISM_SRV}, "ism.csv", cut=cut)
+    show_comments("ISM")
     st.caption("Acima de 50 = expansão; abaixo = contração. "
                "Fonte: ismworld.org (últimos releases) + DBnomics (histórico).")
 
@@ -569,6 +671,7 @@ with tab_cpi:
                    ref=2 if mode.startswith("YoY") else None, yfmt="%", cut=cut)
     with st.expander("📋 Tabela e download"):
         table_download(src, "inflacao.csv", cut=cut)
+    show_comments("Inflação")
     st.caption("Variações calculadas sobre índices dessazonalizados (SA). "
                "'Serviços ex-shelter' = CPI Services less rent of shelter "
                "(proxy do supercore). Core PCE é a métrica-alvo do Fed "
@@ -602,6 +705,7 @@ with tab_juros:
                         "Spread 10a−2a": S["Spread 10a−2a (p.p.)"],
                         "Breakeven 10a (%)": S["Breakeven 10 anos (%)"]},
                        "juros.csv", cut=cut)
+    show_comments("Juros")
     st.caption("Treasuries e breakeven são diários; Fed Funds efetiva é média "
                "mensal. Inversão da curva (spread < 0) historicamente antecede "
                "recessões. Fonte: Fed/Treasury via FRED.")
@@ -623,6 +727,7 @@ with tab_gdp:
         table_download({"QoQ SAAR (%)": S["GDP QoQ anualizado (%)"],
                         "YoY (%)": S["GDP YoY (%)"],
                         "Nível": S["GDP real (nível, US$ bi 2017)"]}, "gdp.csv", cut=cut)
+    show_comments("GDP")
     st.caption("Fonte: BEA via FRED. Dados trimestrais.")
 
 with tab_pay:
@@ -639,33 +744,18 @@ with tab_pay:
     kpi_row(kpis[:6])
     cut = period_picker("pay")
     st.markdown("**Criação de vagas — Nonfarm Payrolls (mil/mês)**")
-    bar_chart(payroll_chg, "Payroll MoM", suffix="", cut=cut, avg3=True)
+    bar_chart(payroll_chg, "Payroll MoM", suffix="", cut=cut, avg=(3, "Média 3m"))
     st.markdown("**Initial Claims — pedidos de seguro-desemprego (mil, semanal)**")
-    line_chart({"Claims": claims, "Média 4 semanas": claims_4w},
-               height=380, cut=cut)
+    bar_chart(claims, "Claims", cut=cut, avg=(4, "Média 4 semanas"), ymin=150)
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**Desemprego (esq.) × Participação (dir.), %**")
-        line_chart({"Desemprego": S["Taxa de desemprego (%)"],
-                    "Participação": S["Participação na força de trabalho (%)"]},
-                   yfmt="%", height=380, cut=cut, secondary={"Participação"})
+        st.markdown("**Desemprego linha (esq.) × Participação barras (dir.), %**")
+        line_bar_chart(S["Taxa de desemprego (%)"], "Desemprego",
+                       S["Participação na força de trabalho (%)"], "Participação",
+                       cut=cut, y2_zoom=True)
     with c2:
         st.markdown("**AHE — YoY linha (esq.) × MoM barras (dir.), %**")
-        a, b = ahe_yoy.dropna(), ahe_mom.dropna()
-        if cut is not None:
-            a, b = a[a.index >= cut], b[b.index >= cut]
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=b.index, y=b.values, name="AHE MoM (dir.)",
-                             yaxis="y2", marker_color=ACCENT, opacity=0.55))
-        fig.add_trace(go.Scatter(x=a.index, y=a.values, name="AHE YoY",
-                                 line=dict(color=PRIMARY, width=2)))
-        fig.update_layout(template="plotly_white", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=380, hovermode="x unified",
-                          legend=dict(orientation="h", y=1.02, x=0),
-                          margin=dict(l=10, r=10, t=30, b=10),
-                          yaxis=dict(ticksuffix="%", gridcolor=GRID),
-                          yaxis2=dict(overlaying="y", side="right",
-                                      ticksuffix="%", showgrid=False))
-        st.plotly_chart(fig, use_container_width=True)
+        line_bar_chart(ahe_yoy, "AHE YoY", ahe_mom, "AHE MoM", cut=cut)
     if not rev2m.dropna().empty:
         st.markdown("**Revisão líquida de 2 meses (mil)**")
         bar_chart(rev2m, "Revisão 2M", cut=cut)
@@ -679,6 +769,7 @@ with tab_pay:
                         "Desemprego (%)": S["Taxa de desemprego (%)"],
                         "AHE MoM (%)": ahe_mom, "AHE YoY (%)": ahe_yoy},
                        "payroll.csv", cut=cut)
+    show_comments("Payroll")
     st.caption("Fonte: BLS e DOL via FRED. Dados dessazonalizados. "
                "Claims é semanal — o termômetro mais tempestivo do emprego.")
 
@@ -690,12 +781,13 @@ with tab_jolts:
              ("Quits rate (%)", S["JOLTS — Quits rate (%)"], 1),
              ("Layoffs rate (%)", S["JOLTS — Layoffs rate (%)"], 1)])
     cut = period_picker("jolts")
-    st.markdown("**Vagas abertas (milhões)**")
-    line_chart({"Vagas abertas": jolts_mi}, height=380, cut=cut)
+    st.markdown("**Vagas abertas (esq.) × Contratações (dir.) — milhões de pessoas**")
+    line_chart({"Vagas abertas": jolts_mi, "Contratações": hires_mi},
+               height=380, cut=cut, secondary={"Contratações"})
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**Hires × Quits × Layoffs (taxa, %)**")
-        line_chart({"Hires": S["JOLTS — Hires rate (%)"],
+        st.markdown("**Contratações × Quits × Layoffs (taxa, %)**")
+        line_chart({"Contratações": S["JOLTS — Hires rate (%)"],
                     "Quits": S["JOLTS — Quits rate (%)"],
                     "Layoffs": S["JOLTS — Layoffs rate (%)"]},
                    yfmt="%", height=380, cut=cut)
@@ -705,15 +797,19 @@ with tab_jolts:
                    height=380, cut=cut)
     with st.expander("📋 Tabela e download"):
         table_download({"Vagas abertas (mi)": jolts_mi,
+                        "Contratações (mi)": hires_mi,
                         "Vagas por desempregado": vac_per_unemp,
                         "Taxa de vagas (%)": S["JOLTS — Taxa de vagas (%)"],
                         "Hires rate (%)": S["JOLTS — Hires rate (%)"],
                         "Quits rate (%)": S["JOLTS — Quits rate (%)"],
                         "Layoffs rate (%)": S["JOLTS — Layoffs rate (%)"]},
                        "jolts.csv", cut=cut)
-    st.caption("Quits alto = trabalhador confiante (pede demissão por opção); "
-               "layoffs baixo = empresas segurando gente. JOLTS sai com ~1 mês "
-               "de defasagem vs. payroll. Fonte: BLS via FRED.")
+    show_comments("JOLTS")
+    st.caption("Vagas abertas é estoque no fim do mês; contratações é fluxo do "
+               "mês (eixo direito). Quits alto = trabalhador "
+               "confiante (pede demissão por opção); layoffs baixo = empresas "
+               "segurando gente. JOLTS sai com ~1 mês de defasagem vs. payroll. "
+               "Fonte: BLS via FRED.")
 
 st.divider()
 st.caption(f"SocInvest · Painel Macro US · FRED + DBnomics (cache 6h) · "

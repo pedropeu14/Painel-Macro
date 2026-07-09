@@ -9,8 +9,15 @@ Painel em Streamlit com os principais indicadores da economia americana, para a 
 - **💵 Inflação** — CPI (Headline, Core, Shelter, Serviços ex-energia, Serviços ex-shelter/supercore, Bens núcleo, Energia, Alimentos), **Core PCE** (métrica-alvo do Fed, linha de 2%) e PPI Final Demand — em YoY ou MoM
 - **🏦 Juros** — Fed Funds, Treasuries 2 e 10 anos, spread 10a−2a (inversão da curva) e breakeven de inflação 10 anos
 - **📈 GDP** — QoQ anualizado (SAAR), YoY e nível real
-- **👷 Payroll** — criação de vagas MoM (+ média 3m), initial claims semanais (+ média 4 semanas), desemprego, participação, salário médio/hora (MoM e YoY), revisão de 2 meses (via upload)
-- **🔄 JOLTS** — vagas abertas (nível e taxa), vagas por desempregado, hires, quits e layoffs
+- **👷 Payroll** — criação de vagas MoM (+ média 3m), initial claims semanais em barras (+ média 4 semanas em linha), desemprego, participação, salário médio/hora (MoM e YoY), revisão de 2 meses (via upload)
+- **🔄 JOLTS** — vagas abertas × hires (milhões, eixo único), vagas por desempregado, taxas de vagas/hires/quits/layoffs
+
+## Comentários por data
+
+Anotações pós-divulgação vivem em `dados/comentarios.csv` (colunas `Date, Aba, Comentário`) e aparecem num expander na aba correspondente. Edite na tabela da **Visão Geral**:
+
+- **💾 Salvar** grava direto no arquivo (rodando localmente)
+- **⬇️ Baixar** exporta o CSV — no Streamlit Cloud o filesystem é efêmero, então para persistir é preciso commitar o arquivo baixado no repositório
 
 ## Fontes de dados (automáticas)
 
@@ -50,6 +57,6 @@ Abre em `http://localhost:8501`.
 
 ## Séries usadas (FRED)
 
-`CPIAUCSL`, `CPILFESL`, `CUSR0000SAH1`, `CUSR0000SASLE`, `CUSR0000SASL2RS`, `CUSR0000SACL1E`, `CPIENGSL`, `CPIUFDSL`, `PCEPI`, `PCEPILFE`, `PPIFIS`, `GDPC1`, `A191RL1Q225SBEA`, `A191RO1Q156NBEA`, `PAYEMS`, `UNRATE`, `CES0500000003`, `CIVPART`, `ICSA`, `FEDFUNDS`, `DGS2`, `DGS10`, `T10Y2Y`, `T10YIE`, `JTSJOL`, `JTSJOR`, `JTSHIR`, `JTSQUR`, `JTSLDR`, `UNEMPLOY`
+`CPIAUCSL`, `CPILFESL`, `CUSR0000SAH1`, `CUSR0000SASLE`, `CUSR0000SASL2RS`, `CUSR0000SACL1E`, `CPIENGSL`, `CPIUFDSL`, `PCEPI`, `PCEPILFE`, `PPIFIS`, `GDPC1`, `A191RL1Q225SBEA`, `A191RO1Q156NBEA`, `PAYEMS`, `UNRATE`, `CES0500000003`, `CIVPART`, `ICSA`, `FEDFUNDS`, `DGS2`, `DGS10`, `T10Y2Y`, `T10YIE`, `JTSJOL`, `JTSHIL`, `JTSJOR`, `JTSHIR`, `JTSQUR`, `JTSLDR`, `UNEMPLOY`
 
 DBnomics (ISM): `pmi`, `neword`, `production`, `employment`, `prices`, `nm-pmi`, `nm-busact`, `nm-neword`, `nm-employment`, `nm-prices` (série `in`/`pm`).
