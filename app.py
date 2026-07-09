@@ -22,8 +22,8 @@ import streamlit as st
 st.set_page_config(page_title="Painel Macro US | SocInvest", page_icon="📈",
                    layout="wide", initial_sidebar_state="expanded")
 
-PRIMARY, ACCENT, GRID = "#0B3D2E", "#2E9E6B", "#E6E9EC"
-NEG = "#C0392B"
+PRIMARY, ACCENT, GRID = "#4f8cff", "#22c07a", "#232d42"
+NEG = "#ef5561"
 
 st.markdown(f"""<style>
 .main .block-container {{ padding-top:1.2rem; max-width:1450px; }}
@@ -33,7 +33,7 @@ h1,h2,h3 {{ color:{PRIMARY}; }}
   border-bottom:3px solid {ACCENT}; padding-bottom:12px; margin-bottom:8px; }}
 .soc-badge {{ background:{PRIMARY}; color:#fff; border-radius:8px;
   padding:6px 12px; font-weight:700; font-size:20px; }}
-.soc-sub {{ color:#5b6670; font-size:14px; }}
+.soc-sub {{ color:#8593ab; font-size:14px; }}
 </style>
 <div class="soc-header"><span class="soc-badge">SocInvest</span><div>
 <div style="font-size:26px;font-weight:800;color:{PRIMARY};">Painel Macro — EUA</div>
@@ -385,7 +385,7 @@ def line_chart(series_map, ref=None, height=460, yfmt=None, cut=None, secondary=
     if ref is not None:
         fig.add_hline(y=ref, line_dash="dash", line_color="#8a8f94",
                       annotation_text=f"{ref:g}")
-    fig.update_layout(template="plotly_white", height=height, hovermode="x unified",
+    fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=height, hovermode="x unified",
                       legend=dict(orientation="h", y=1.02, x=0),
                       margin=dict(l=10, r=10, t=30, b=10))
     fig.update_xaxes(gridcolor=GRID)
@@ -409,7 +409,7 @@ def bar_chart(s, name, height=380, suffix="", cut=None, avg3=False):
         m = s.rolling(3).mean()
         fig.add_trace(go.Scatter(x=m.index, y=m.values, mode="lines",
                                  name="Média 3m", line=dict(color=PRIMARY, width=2)))
-    fig.update_layout(template="plotly_white", height=height, hovermode="x unified",
+    fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=height, hovermode="x unified",
                       legend=dict(orientation="h", y=1.02, x=0),
                       margin=dict(l=10, r=10, t=30, b=10))
     fig.update_yaxes(gridcolor=GRID, ticksuffix=suffix)
@@ -595,7 +595,7 @@ with tab_pay:
                              yaxis="y2", marker_color=ACCENT, opacity=0.55))
         fig.add_trace(go.Scatter(x=a.index, y=a.values, name="AHE YoY",
                                  line=dict(color=PRIMARY, width=2)))
-        fig.update_layout(template="plotly_white", height=380, hovermode="x unified",
+        fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=380, hovermode="x unified",
                           legend=dict(orientation="h", y=1.02, x=0),
                           margin=dict(l=10, r=10, t=30, b=10),
                           yaxis=dict(ticksuffix="%", gridcolor=GRID),
