@@ -12,6 +12,10 @@ Painel em Streamlit com os principais indicadores da economia americana, para a 
 - **👷 Payroll** — criação de vagas MoM (+ média 3m), initial claims semanais em barras (+ média 4 semanas em linha), desemprego, participação, salário médio/hora (MoM e YoY), revisão de 2 meses (via upload)
 - **🔄 JOLTS** — vagas abertas × hires (milhões, eixo único), vagas por desempregado, taxas de vagas/hires/quits/layoffs
 
+## Repercussão na imprensa
+
+Cada aba tem um expander **📰 Repercussão na imprensa** com as manchetes recentes que casam com o tema (payroll → notícias de emprego, Inflação → CPI/PCE, etc.). Fontes via RSS público, sem API key: CNBC Economy, Investing.com (indicadores econômicos), MarketWatch e press releases do Federal Reserve. Cache de 30 minutos. A Visão Geral mostra o feed completo sem filtro.
+
 ## Comentários por data
 
 Anotações pós-divulgação vivem em `dados/comentarios.csv` (colunas `Date, Aba, Comentário`) e aparecem num expander na aba correspondente. Edite na tabela da **Visão Geral**:

@@ -11,7 +11,10 @@ Rodar: streamlit run app.py
 import glob
 import io
 import os
+import re
+import xml.etree.ElementTree as ET
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 
 import numpy as np
 import pandas as pd
@@ -371,6 +374,79 @@ def load_comments() -> pd.DataFrame:
     return df[COMMENTS_COLS].sort_values("Date", ascending=False)
 
 
+# --- notícias (repercussão dos releases na imprensa) -------------------------
+NEWS_FEEDS = {
+    "CNBC Economy": "https://www.cnbc.com/id/20910258/device/rss/rss.html",
+    "Investing.com": "https://www.investing.com/rss/news_14.rss",
+    "MarketWatch": "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+    "Federal Reserve": "https://www.federalreserve.gov/feeds/press_all.xml",
+}
+NEWS_KEYWORDS = {  # aba -> termos (título+resumo, case-insensitive); sem chave = tudo
+    "ISM": ["ism", "pmi", "manufacturing", "factory activity", "services sector"],
+    "Inflação": ["cpi", "inflation", "pce", "ppi", "consumer price", "deflation"],
+    "Juros": ["fed", "fomc", "treasury", "yield", "rate cut", "rate hike",
+              "powell", "interest rate", "bond market"],
+    "GDP": ["gdp", "economic growth", "recession", "economy grew",
+            "economy shrank"],
+    "Payroll": ["payroll", "jobs report", "jobless", "unemployment",
+                "labor market", "hiring", "claims", "wages"],
+    "JOLTS": ["jolts", "job openings", "quits", "layoff", "labor market"],
+}
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_news() -> list:
+    """Agrega os feeds RSS; retorna [{source, title, link, date, summary}]."""
+    items = []
+    for source, url in NEWS_FEEDS.items():
+        try:
+            r = requests.get(url, timeout=20, headers=UA)
+            r.raise_for_status()
+            root = ET.fromstring(r.content)
+        except Exception:
+            continue
+        for it in root.iter("item"):
+            title = (it.findtext("title") or "").strip()
+            if not title:
+                continue
+            try:
+                dt = parsedate_to_datetime(it.findtext("pubDate", "")
+                                           ).replace(tzinfo=None)
+            except Exception:
+                dt = None
+            desc = re.sub(r"<[^>]+>", " ", it.findtext("description") or "")
+            desc = re.sub(r"\s+", " ", desc).strip()
+            items.append({"source": source, "title": title,
+                          "link": (it.findtext("link") or "").strip(),
+                          "date": dt, "summary": desc[:280]})
+    items.sort(key=lambda x: x["date"] or datetime.min, reverse=True)
+    return items
+
+
+def show_news(aba: str, n: int = 8):
+    """Expander com as notícias recentes que casam com os termos da aba."""
+    try:
+        news = fetch_news()
+    except Exception:
+        return
+    kws = NEWS_KEYWORDS.get(aba)
+    if kws:
+        news = [x for x in news
+                if any(k in (x["title"] + " " + x["summary"]).lower()
+                       for k in kws)]
+    news = news[:n]
+    if not news:
+        return
+    with st.expander(f"📰 Repercussão na imprensa ({len(news)})"):
+        for x in news:
+            when = f" · {x['date']:%d/%m %H:%M}" if x["date"] else ""
+            st.markdown(f"**[{x['title']}]({x['link']})**  \n"
+                        f"<span style='color:#8a94a6;font-size:12px'>"
+                        f"{x['source']}{when}</span>", unsafe_allow_html=True)
+            if x["summary"]:
+                st.caption(x["summary"])
+
+
 def show_comments(aba: str):
     """Expander com os comentários da aba (mais recentes primeiro)."""
     df = st.session_state.get("comments", pd.DataFrame())
@@ -604,6 +680,11 @@ with tab_ov:
         st.subheader("Séries extras (upload)")
         line_chart(extras, cut=period_picker("ov"))
     st.divider()
+    st.subheader("📰 Repercussão na imprensa")
+    st.caption("Manchetes recentes de economia (CNBC, Investing.com, MarketWatch "
+               "e Federal Reserve) — nas outras abas, filtradas pelo tema.")
+    show_news("Geral", n=10)
+    st.divider()
     st.subheader("🗒️ Comentários por data")
     st.caption("Anotações feitas após cada divulgação — aparecem na aba "
                "correspondente. Edite abaixo (linhas novas no +). Para "
@@ -649,6 +730,7 @@ with tab_ism:
     with st.expander("📋 Tabela e download"):
         table_download({k: S[k] for k in ISM_MFG + ISM_SRV}, "ism.csv", cut=cut)
     show_comments("ISM")
+    show_news("ISM")
     st.caption("Acima de 50 = expansão; abaixo = contração. "
                "Fonte: ismworld.org (últimos releases) + DBnomics (histórico).")
 
@@ -672,6 +754,7 @@ with tab_cpi:
     with st.expander("📋 Tabela e download"):
         table_download(src, "inflacao.csv", cut=cut)
     show_comments("Inflação")
+    show_news("Inflação")
     st.caption("Variações calculadas sobre índices dessazonalizados (SA). "
                "'Serviços ex-shelter' = CPI Services less rent of shelter "
                "(proxy do supercore). Core PCE é a métrica-alvo do Fed "
@@ -706,6 +789,7 @@ with tab_juros:
                         "Breakeven 10a (%)": S["Breakeven 10 anos (%)"]},
                        "juros.csv", cut=cut)
     show_comments("Juros")
+    show_news("Juros")
     st.caption("Treasuries e breakeven são diários; Fed Funds efetiva é média "
                "mensal. Inversão da curva (spread < 0) historicamente antecede "
                "recessões. Fonte: Fed/Treasury via FRED.")
@@ -728,6 +812,7 @@ with tab_gdp:
                         "YoY (%)": S["GDP YoY (%)"],
                         "Nível": S["GDP real (nível, US$ bi 2017)"]}, "gdp.csv", cut=cut)
     show_comments("GDP")
+    show_news("GDP")
     st.caption("Fonte: BEA via FRED. Dados trimestrais.")
 
 with tab_pay:
@@ -770,6 +855,7 @@ with tab_pay:
                         "AHE MoM (%)": ahe_mom, "AHE YoY (%)": ahe_yoy},
                        "payroll.csv", cut=cut)
     show_comments("Payroll")
+    show_news("Payroll")
     st.caption("Fonte: BLS e DOL via FRED. Dados dessazonalizados. "
                "Claims é semanal — o termômetro mais tempestivo do emprego.")
 
@@ -805,6 +891,7 @@ with tab_jolts:
                         "Layoffs rate (%)": S["JOLTS — Layoffs rate (%)"]},
                        "jolts.csv", cut=cut)
     show_comments("JOLTS")
+    show_news("JOLTS")
     st.caption("Vagas abertas é estoque no fim do mês; contratações é fluxo do "
                "mês (eixo direito). Quits alto = trabalhador "
                "confiante (pede demissão por opção); layoffs baixo = empresas "
