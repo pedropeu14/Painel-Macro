@@ -63,6 +63,7 @@ FRED = {  # label -> series_id
     "PCE (índice)": "PCEPI",
     "Core PCE (índice)": "PCEPILFE",
     "PPI Final Demand (índice)": "PPIFIS",
+    "Core PPI (índice)": "PPIFES",
     "Initial Claims (semanal)": "ICSA",
     "Fed Funds efetiva (%)": "FEDFUNDS",
     "UST 2 anos (%)": "DGS2",
@@ -659,11 +660,15 @@ with tab_cpi:
              ("Core PCE YoY (%)", cpi_yoy["Core PCE YoY"], 1),
              ("Serviços ex-shelter YoY (%)", cpi_yoy["CPI Serviços ex-shelter YoY"], 1),
              ("Shelter YoY (%)", cpi_yoy["CPI Moradia/Shelter YoY"], 1)])
+    kpi_row([("PPI YoY (%)", cpi_yoy["PPI Final Demand YoY"], 1),
+             ("PPI MoM (%)", cpi_mom["PPI Final Demand MoM"], 1),
+             ("Core PPI YoY (%)", cpi_yoy["Core PPI YoY"], 1),
+             ("Core PPI MoM (%)", cpi_mom["Core PPI MoM"], 1)])
     cut = period_picker("cpi")
     mode = st.radio("Métrica", ["YoY (%)", "MoM (%)"], horizontal=True)
     src = cpi_yoy if mode.startswith("YoY") else cpi_mom
     default = [c for c in ["CPI YoY", "Core CPI YoY", "Core PCE YoY",
-                           "CPI Serviços ex-shelter YoY"]]
+                           "PPI Final Demand YoY"]]
     default = [d.replace("YoY", "MoM") for d in default] if mode.startswith("MoM") else default
     sel = st.multiselect("Séries", list(src), default=[d for d in default if d in src])
     if sel:
@@ -675,7 +680,9 @@ with tab_cpi:
     st.caption("Variações calculadas sobre índices dessazonalizados (SA). "
                "'Serviços ex-shelter' = CPI Services less rent of shelter "
                "(proxy do supercore). Core PCE é a métrica-alvo do Fed "
-               "(linha de 2%). Fonte: BLS e BEA via FRED.")
+               "(linha de 2%). PPI = inflação ao produtor (Final Demand), "
+               "costuma antecipar o repasse ao consumidor; série desde "
+               "2009/2010. Fonte: BLS e BEA via FRED.")
 
 with tab_juros:
     st.subheader("Juros — curva de Treasuries e expectativa de inflação")
